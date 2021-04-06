@@ -24,7 +24,15 @@ const typeDefs = gql`
     type Mutation {
         signUp(input: SignUpInput): AuthUser!
         signIn(input: SignInInput): AuthUser!
+
         createTaskList(title: String!): TaskList!
+        updateTaskList(id: ID!, title: String!) TaskList!
+        deleteTaskList(id: ID!): Boolean!
+        addUserToTask(taskListId: ID!, userId: ID!): TaskList
+    
+        createToDo(content: String!, taskList: ID!): ToDo!
+        updateToDo(id: ID!, content: String, isCompleted: Boolean): ToDo!
+        deleteToDo(id: ID!)
     }
 
     input SignInInput {
@@ -66,7 +74,7 @@ const typeDefs = gql`
         content: String!
         isCompleted: Boolean!
 
-        taskList: TaskList
+        taskList: TaskList!
     }
 `;
 
@@ -104,6 +112,9 @@ const resolvers = {
                 token: getToken(user)
             }
         },
+
+        //TaskList CRUDs
+
         createTaskList: async(_, {title}, {db, user}) => {
             if(!user) {throw new error('Authenication Required. Please Sign In.')}
 
@@ -116,7 +127,78 @@ const resolvers = {
             const result = await db.collection('TaskList').insertOne(newTasksList);
             console.log(result.ops[0]);
             return result.ops[0];
-        }
+        },
+        updateTaskList: async(_, {id, title}, {db, user}) => {
+            if(!user) {throw new error('Authenication Required. Please Sign In.')}
+
+            await db.collection('TaskList').updateOne({_id: ObjectID(id)}, {$set: {title: title}})
+            
+            return await db.collection('TaskList').findOne({_id: ObjectID(id)})
+        },
+        deleteTaskList: async(_, {id}, {db, user}) => {
+            if(!user) {throw new Error('Authentication Required. Please Sign In')}
+
+            await db.collection('TaskList').remove({_id: id}, {justOne: true});
+            return true;
+        },
+        addUserToTask: async (_, {taskListId, userId}, {db, user}) => {
+            if(!user) {throw new Error("Authentication Required. Please Sign in")}
+            
+            const taskList = await db.collection('TaskList').findOne({_id: ObjectID(taskListId)});
+            if(!taskList){return null}
+
+            if(taskList.userIds.find((dbId) => dbId.toString() === userId.toString())){
+                return taskList;
+            }
+
+            await db.collection('TaskList').updateOne({_id: ObjectID(taskListId)}, {
+                $push: {
+                    userIds: ObjectID(userId)
+                }
+            })
+
+            taskList.userIds.push(ObjectID(userId));
+            return taskList;
+            // const taskList = await db.collection('TaskList').findOneAndUpdate({_id: ObjectID(taskListId)}, {
+            //     $set: {
+            //         userIds: [...userIds, userId]
+            //     }
+            // });
+        },
+
+        //Todo CRUDs
+        createToDo: async(_, { content, taskListId }, { db, user }) => {
+            if (!user) { throw new Error('Authentication Error. Please sign in'); }
+            const newToDo = {
+              content, 
+              taskListId: ObjectID(taskListId),
+              isCompleted: false,
+            }
+            const result = await db.collection('ToDo').insert(newToDo);
+            return result.ops[0];
+          },
+      
+        updateToDo: async(_, data, { db, user }) => {
+            if (!user) { throw new Error('Authentication Error. Please sign in'); }
+      
+            const result = await db.collection('ToDo')
+                                  .updateOne({
+                                    _id: ObjectID(data.id)
+                                  }, {
+                                    $set: data
+                                  })
+            
+            return await db.collection('ToDo').findOne({ _id: ObjectID(data.id) });
+          },
+      
+        deleteToDo: async(_, { id }, { db, user }) => {
+            if (!user) { throw new Error('Authentication Error. Please sign in'); }
+            
+            // TODO only collaborators of this task list should be able to delete
+            await db.collection('ToDo').removeOne({ _id: ObjectID(id) });
+      
+            return true;
+        },
     },
     User: {
         id: ({_id}) => _id || id
@@ -128,7 +210,14 @@ const resolvers = {
             userIds.map((userId) => (
               db.collection('Users').findOne({ _id: userId}))
             )
-          ),
+        ),
+        todos: async ({_id}, _, {db}) => (
+            await db.collection("ToDo").find({taskListId: ObjectID(_id)}).toArray()
+        ),
+    },
+    ToDo: {
+        id: ({_id, id}) => _id || id,
+        taskList: async ({taskListId}, _, { db }) => await db.collection('TaskList').findOne({_id: ObjectID(taskListId)})
     }
 };
   
