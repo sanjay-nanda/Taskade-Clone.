@@ -176,8 +176,7 @@ const resolvers = {
             }
             const result = await db.collection('ToDo').insert(newToDo);
             return result.ops[0];
-          },
-      
+        },
         updateToDo: async(_, data, { db, user }) => {
             if (!user) { throw new Error('Authentication Error. Please sign in'); }
       
@@ -189,8 +188,7 @@ const resolvers = {
                                   })
             
             return await db.collection('ToDo').findOne({ _id: ObjectID(data.id) });
-          },
-      
+        },
         deleteToDo: async(_, { id }, { db, user }) => {
             if (!user) { throw new Error('Authentication Error. Please sign in'); }
             
@@ -205,7 +203,16 @@ const resolvers = {
     },
     TaskList: {
         id: ({_id, id}) => _id || id,
-        progress: () => 0,
+        progress: async ({_id}, _, {db}) => {
+            const todos = await db.collection('ToDo').find({ taskListId: ObjectID(_id)}).toArray();
+            const completed = todos.filter(todo => todo.isCompleted);
+            
+            if(todos.length === 0){
+                return 0;
+            }
+            
+            return 100 * completed.length / todos.length;
+        },
         users: async ({ userIds }, _, { db }) => Promise.all(
             userIds.map((userId) => (
               db.collection('Users').findOne({ _id: userId}))
